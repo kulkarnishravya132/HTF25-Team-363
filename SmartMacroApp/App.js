@@ -4,90 +4,113 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  ScrollView,
   Alert,
   StyleSheet,
+  ScrollView,
   Linking,
 } from 'react-native';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { Picker } from '@react-native-picker/picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function App() {
-  const [macroCommand, setMacroCommand] = useState('');
-  const [scheduledTime, setScheduledTime] = useState(null);
-  const [macros, setMacros] = useState({});
+  const [selectedMacro, setSelectedMacro] = useState('');
+  const [scheduledDate, setScheduledDate] = useState(null);
+  const [showDatePicker, setShowDatePicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
+
   const [customName, setCustomName] = useState('');
-  const [emailTo, setEmailTo] = useState('');
-  const [emailSubject, setEmailSubject] = useState('');
-  const [emailBody, setEmailBody] = useState('');
-  const [showPicker, setShowPicker] = useState(false);
+  const [customDescription, setCustomDescription] = useState('');
+  const [userMacros, setUserMacros] = useState({});
 
   const predefinedMacros = {
-    'Send email to team': () => {
-      Linking.openURL(
-        'mailto:team@example.com?subject=Daily Update&body=Hi team, here’s today’s update...'
-      );
-    },
-    'Create daily report': () => {
-      Alert.alert('📄 Report', 'Daily report created!');
-    },
-    'Open Zoom meeting': () => {
+    'Join Zoom': () => {
       Linking.openURL('https://zoom.us/j/123456789');
     },
+    'Create Report': () => {
+      Alert.alert('📄 Report', 'Your daily report has been generated and saved.');
+    },
+    'Send Email': () => {
+      Linking.openURL(
+        'mailto:team@example.com?subject=Daily Update&body=Hello team, here’s today’s update.'
+      );
+    },
   };
+
+  const allMacros = { ...predefinedMacros, ...userMacros };
 
   useEffect(() => {
     const loadMacros = async () => {
       const stored = await AsyncStorage.getItem('userMacros');
       const parsed = stored ? JSON.parse(stored) : {};
-      setMacros({ ...predefinedMacros, ...parsed });
+      setUserMacros(parsed);
     };
     loadMacros();
   }, []);
 
-  const saveUserMacros = async (updated) => {
-    const userMacros = Object.fromEntries(
-      Object.entries(updated).filter(([key]) => !predefinedMacros[key])
-    );
-    await AsyncStorage.setItem('userMacros', JSON.stringify(userMacros));
-  };
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const now = new Date();
+      if (
+        scheduledDate &&
+        selectedMacro &&
+        now.getHours() === scheduledDate.getHours() &&
+        now.getMinutes() === scheduledDate.getMinutes() &&
+        now.getDate() === scheduledDate.getDate() &&
+        now.getMonth() === scheduledDate.getMonth() &&
+        now.getFullYear() === scheduledDate.getFullYear()
+      ) {
+        handleRunMacro();
+        setScheduledDate(null);
+      }
+    }, 60000);
 
-  const createEmailMacro = (to, subject, body) => {
-    return () => {
-      const url = `mailto:${to}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-      Linking.openURL(url);
-    };
-  };
+    return () => clearInterval(interval);
+  }, [scheduledDate, selectedMacro]);
 
   const handleCreateMacro = () => {
-    if (!customName || !emailTo || !emailSubject || !emailBody) {
-      Alert.alert('Missing Fields', 'Please fill in all fields to create a macro.');
+    if (!customName || !customDescription) {
+      Alert.alert('Missing Fields', 'Please enter both name and description.');
       return;
     }
-    const newMacro = createEmailMacro(emailTo, emailSubject, emailBody);
-    const updated = { ...macros, [customName]: newMacro };
-    setMacros(updated);
-    setMacroCommand(customName);
-    saveUserMacros(updated);
+    const newMacro = () => {
+      Alert.alert(`🚀 ${customName}`, customDescription);
+    };
+    const updated = { ...userMacros, [customName]: newMacro };
+    setUserMacros(updated);
+    AsyncStorage.setItem('userMacros', JSON.stringify(updated));
     setCustomName('');
-    setEmailTo('');
-    setEmailSubject('');
-    setEmailBody('');
+    setCustomDescription('');
+    Alert.alert('✅ Macro Created', `Macro "${customName}" is ready to use.`);
   };
 
   const handleRunMacro = () => {
-    if (macros[macroCommand]) {
-      macros[macroCommand]();
+    if (allMacros[selectedMacro]) {
+      allMacros[selectedMacro]();
     } else {
-      Alert.alert('Unknown Macro', 'No macro found for that command.');
+      Alert.alert('No macro selected');
     }
   };
 
-  const handleSchedule = (event, selectedDate) => {
-    setShowPicker(false);
-    if (selectedDate) {
-      setScheduledTime(selectedDate);
-      Alert.alert('🕒 Scheduled', `Macro scheduled for ${selectedDate.toLocaleTimeString()}`);
+  const handleDateChange = (event, date) => {
+    setShowDatePicker(false);
+    if (date) {
+      const updated = new Date(date);
+      if (scheduledDate) {
+        updated.setHours(scheduledDate.getHours());
+        updated.setMinutes(scheduledDate.getMinutes());
+      }
+      setScheduledDate(updated);
+    }
+  };
+
+  const handleTimeChange = (event, time) => {
+    setShowTimePicker(false);
+    if (time) {
+      const updated = scheduledDate ? new Date(scheduledDate) : new Date();
+      updated.setHours(time.getHours());
+      updated.setMinutes(time.getMinutes());
+      setScheduledDate(updated);
     }
   };
 
@@ -95,21 +118,62 @@ export default function App() {
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>Smart Macro Automator</Text>
 
-      <Text style={styles.label}>Choose a Macro Template:</Text>
-      {Object.keys(predefinedMacros).map((template) => (
-        <TouchableOpacity
-          key={template}
-          style={styles.button}
-          onPress={() => {
-            setMacroCommand(template);
-            predefinedMacros[template]();
-          }}
+      <Text style={styles.label}>Select a Macro Template:</Text>
+      <View style={styles.dropdown}>
+        <Picker
+          selectedValue={selectedMacro}
+          onValueChange={(itemValue) => setSelectedMacro(itemValue)}
         >
-          <Text style={styles.buttonText}>{template}</Text>
-        </TouchableOpacity>
-      ))}
+          <Picker.Item label="-- Choose Macro --" value="" />
+          {Object.keys(allMacros).map((macro) => (
+            <Picker.Item key={macro} label={macro} value={macro} />
+          ))}
+        </Picker>
+      </View>
 
-      <Text style={styles.label}>Create Email Macro:</Text>
+      <TouchableOpacity style={styles.button} onPress={handleRunMacro}>
+        <Text style={styles.buttonText}>Run Macro Now</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.label}>Schedule Macro:</Text>
+      <TouchableOpacity style={styles.button} onPress={() => setShowDatePicker(true)}>
+        <Text style={styles.buttonText}>Pick Date</Text>
+      </TouchableOpacity>
+      {showDatePicker && (
+        <DateTimePicker
+          value={scheduledDate || new Date()}
+          mode="date"
+          display="calendar"
+          onChange={handleDateChange}
+        />
+      )}
+
+      <TouchableOpacity style={styles.button} onPress={() => setShowTimePicker(true)}>
+        <Text style={styles.buttonText}>Pick Time</Text>
+      </TouchableOpacity>
+      {showTimePicker && (
+        <DateTimePicker
+          value={scheduledDate || new Date()}
+          mode="time"
+          display="spinner"
+          onChange={handleTimeChange}
+        />
+      )}
+
+      <View style={styles.preview}>
+        <Text style={styles.previewTitle}>📅 Scheduled Macro</Text>
+        <Text><Text style={styles.bold}>Macro:</Text> {selectedMacro || 'None selected'}</Text>
+        <Text>
+          <Text style={styles.bold}>Date:</Text>{' '}
+          {scheduledDate ? scheduledDate.toDateString() : 'Not set'}
+        </Text>
+        <Text>
+          <Text style={styles.bold}>Time:</Text>{' '}
+          {scheduledDate ? scheduledDate.toLocaleTimeString() : 'Not set'}
+        </Text>
+      </View>
+
+      <Text style={styles.label}>Create Your Own Macro:</Text>
       <TextInput
         style={styles.input}
         placeholder="Macro name"
@@ -118,62 +182,13 @@ export default function App() {
       />
       <TextInput
         style={styles.input}
-        placeholder="Recipient email"
-        value={emailTo}
-        onChangeText={setEmailTo}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Subject"
-        value={emailSubject}
-        onChangeText={setEmailSubject}
-      />
-      <TextInput
-        style={styles.input}
-        placeholder="Body"
-        value={emailBody}
-        onChangeText={setEmailBody}
+        placeholder="Macro description"
+        value={customDescription}
+        onChangeText={setCustomDescription}
       />
       <TouchableOpacity style={styles.button} onPress={handleCreateMacro}>
-        <Text style={styles.buttonText}>Save Email Macro</Text>
+        <Text style={styles.buttonText}>Save Macro</Text>
       </TouchableOpacity>
-
-      <Text style={styles.label}>Run Macro by Name:</Text>
-      <TextInput
-        style={styles.input}
-        placeholder="e.g., Send email to team"
-        value={macroCommand}
-        onChangeText={setMacroCommand}
-      />
-      <TouchableOpacity style={styles.button} onPress={handleRunMacro}>
-        <Text style={styles.buttonText}>Run Macro</Text>
-      </TouchableOpacity>
-
-      <TouchableOpacity style={styles.button} onPress={() => setShowPicker(true)}>
-        <Text style={styles.buttonText}>Set Alarm Time (Optional)</Text>
-      </TouchableOpacity>
-      {showPicker && (
-        <DateTimePicker
-          value={new Date()}
-          mode="time"
-          display="default"
-          onChange={handleSchedule}
-        />
-      )}
-
-      {macroCommand ? (
-        <View style={styles.preview}>
-          <Text style={styles.previewTitle}>🌟 Macro Preview</Text>
-          <Text><Text style={styles.bold}>Command:</Text> {macroCommand}</Text>
-          {scheduledTime ? (
-            <Text>
-              <Text style={styles.bold}>Scheduled for:</Text> {scheduledTime.toLocaleTimeString()}
-            </Text>
-          ) : (
-            <Text style={styles.italic}>No schedule set</Text>
-          )}
-        </View>
-      ) : null}
     </ScrollView>
   );
 }
@@ -196,6 +211,13 @@ const styles = StyleSheet.create({
     color: '#6a1b9a',
     marginBottom: 6,
     marginTop: 12,
+  },
+  dropdown: {
+    borderWidth: 1,
+    borderColor: '#ce93d8',
+    borderRadius: 8,
+    marginBottom: 12,
+    backgroundColor: '#fff',
   },
   input: {
     borderWidth: 1,
@@ -233,9 +255,5 @@ const styles = StyleSheet.create({
   },
   bold: {
     fontWeight: 'bold',
-  },
-  italic: {
-    fontStyle: 'italic',
-    color: '#757575',
   },
 });
